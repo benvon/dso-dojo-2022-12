@@ -8,6 +8,9 @@ generated*
 *.tfstate
 *.tfstate.*
 
+the.plan
+**/the.plan
+
 # Crash log files
 crash.log
 crash.*.log
