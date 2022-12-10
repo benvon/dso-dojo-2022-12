@@ -7,91 +7,38 @@ terraform {
   }
 }
 
-data "aws_iam_policy_document" "lambda_assume_role" {
-  statement {
-    actions = ["sts:AssumeRole"]
+module "aws_vpc" {
+    source = "terraform-aws-modules/vpc/aws"
 
-    principals {
-      type        = "Service"
-      identifiers = ["lambda.amazonaws.com"]
-    }
+    name = "dso-dojo-2022-12-bv"
+    cidr = "10.99.0.0/16"
+    create_igw = true
+    azs = ["us-west-1a", "us-west-1b", "us-west-1c"]
+    public_subnets = ["10.99.66.0/24", "10.99.99.0/24", "10.99.33.0/24"]
+    private_subnets = ["10.99.11.0/24", "10.99.22.0/24", "10.99.44.0/24"]
+    enable_nat_gateway = true
+  
+}
+
+resource "aws_s3_bucket" "remote_backend_storage" {
+  bucket = "dso-dojo-2022-12-bv-terraform-state"
+  acl    = "private"
+}
+resource "aws_s3_bucket_versioning" "remote_state_versioning" {
+  bucket = aws_s3_bucket.remote_backend_storage.id
+  //enabled = true
+  versioning_configuration {
+    
   }
 }
 
-resource "aws_iam_role" "lambda" {
-  name               = "dso-dojo-2022-12-lambda-basic"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
-}
-
-resource "aws_iam_role_policy_attachment" "basic_execution" {
-  role       = aws_iam_role.lambda.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-locals {
-  lambdas = toset([
-    "check_code_form",
-    "check_code_used",
-    "generate_link",
-  ])
-}
-
-resource "aws_lambda_function" "basic_lambdas" {
-  for_each = local.lambdas
-
-  filename      = "${path.module}/../lambdas/${each.key}.zip"
-  function_name = each.key
-  role          = aws_iam_role.lambda.arn
-  runtime       = "python3.9"
-  handler       = "lambda_function.lambda_handler"
-}
-
-data "aws_iam_policy_document" "lambda_invoke" {
-  statement {
-    actions = [
-      "lambda:InvokeFunction",
-      "lambda:InvokeAsync",
-    ]
-
-    resources = [
-      for lambda in aws_lambda_function.basic_lambdas : lambda.arn
-    ]
+resource "aws_dynamodb_table" "remote_backend_lock" {
+  name           = "dso-dojo-2022-12-bv-terraform-state-lock"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "LockID"
+  attribute {
+    name = "LockID"
+    type = "S"
   }
 }
 
-resource "aws_iam_policy" "lambda_invoke" {
-  name   = "dso-dojo-2022-12-lambda-basic-invoke"
-  policy = data.aws_iam_policy_document.lambda_invoke.json
-}
-
-resource "aws_iam_role" "lambda_invoke" {
-  name               = "dso-dojo-2022-12-lambda-basic-invoke"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
-}
-
-resource "aws_iam_role_policy_attachment" "lambda_invoke" {
-  role       = aws_iam_role.lambda_invoke.name
-  policy_arn = aws_iam_policy.lambda_invoke.arn
-}
-
-resource "aws_iam_role_policy_attachment" "invoke_execution" {
-  role       = aws_iam_role.lambda_invoke.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-resource "aws_lambda_function" "runner" {
-  filename      = "${path.module}/../lambdas/runner.zip"
-  function_name = "runner"
-  role          = aws_iam_role.lambda_invoke.arn
-  runtime       = "python3.9"
-  handler       = "lambda_function.lambda_handler"
-}
-
-resource "aws_lambda_function_url" "runner" {
-  function_name      = aws_lambda_function.runner.function_name
-  authorization_type = "NONE"
-}
-
-output "runner_url" {
-  value = aws_lambda_function_url.runner.function_url
-}
